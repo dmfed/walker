@@ -42,12 +42,12 @@ func main() {
 	// Then we tell Walker to crawl our source directory.
 	infos := w.Walk(context.Background(), src, walker.DiscardDirs)
 
-	// Then we'l apply our multiplexer to the results channel
-	// not that there needs to be a consumer for both channels, 
+	// Then we'll apply our multiplexer to the results channel.
+	// Note that there needs to be a consumer for both channels, 
 	// otherwise we'll have a deadlock. Also not a very good example
-	// since consumer for one of resulting channels can be much slower
+	// since the consumer for one of resulting channels can be much slower
 	// which will slow down overall performance if consumer's work is done 
-	// synchronously on read from channe (not is a goroutine).
+	// synchronously on read from channel (not in a goroutine).
 	pythonFiles, goFiles := multiplex(infos)
 
 	// so let's add them consumers
