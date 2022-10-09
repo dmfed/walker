@@ -27,12 +27,12 @@ func main() {
 	// First we'll create a Walker instance.
 	w := walker.New()
 
-	// Then we tell Walker to crawl our source directory.
+	// Then we tell Walker to crawl our source directory with
+	// a custom filter (onlyGoFiles func).
 	infos := w.Walk(context.Background(), src, onlyGoFiles)
 
-	// so let's add them consumers
 	for f := range infos {
-		// this will output only names of go files found
+		// this will output only names of Go files found
 		fmt.Println(f.DirEntry.Name())
 	}
 
