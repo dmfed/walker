@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"walker"
+	"github.com/dmfed/walker"
 )
 
 // onlyGoFiles implements walker.FilterFunc

@@ -21,7 +21,7 @@ type FilterFunc func(Info) bool
 
 // filter accepts chan Info and zero or moreFilterFunc and returns chan Info
 // which only emiths those elements for which all funcs returned true.
-func filter(c <-chan Info, funcs ...FilterFunc) <- chan Info {
+func filter(c chan Info, funcs ...FilterFunc) chan Info {
 	out := make(chan Info)
 	go func() {
 		for {

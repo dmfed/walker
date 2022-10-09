@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"walker"
+	"github.com/dmfed/walker"
 )
 
 // creates two channels and sorts files depending on file extension

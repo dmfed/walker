@@ -59,22 +59,23 @@ func newWalker() Walker {
 
 
 func walkerWalk(ctx context.Context, w *walker, path string, funcs ...FilterFunc) (<-chan Info) {
-	filesCh := make(chan Info)
+	out := make(chan Info)
 
-	filtered := filter(filesCh, funcs...)
-	// filter func will take care of its output
-	// chan itself when input chan closes.
-	go func() {
-		defer close(filesCh)
+	go func(c chan Info) {
+		defer close(c)
 
-		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, filesCh))
+		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, c))
 
 		w.mu.Lock()
 		w.err = err
 		w.mu.Unlock()
-	}()
+	}(out)
 
-	return filtered
+	if len(funcs) > 0 {
+		out = filter(out, funcs...)
+	}
+
+	return out
 }
 
 func walkerErr(w *walker) error {
