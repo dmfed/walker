@@ -46,7 +46,12 @@ func TestWalkWithContextCancelation(t *testing.T) {
 
 	count := 0
 	for f := range files {
-		t.Log(f)
+		// t.Log(f)
+		if f.Path == "" {
+			t.Error("got empty Path from channel")
+		} else if f.DirEntry == nil {
+			t.Error("got nil DirEntry from channel")
+		}
 		if count == 2 {
 			// simulating context cancellation here
 			cancel()
