@@ -1,3 +1,3 @@
-module github.com/dmfed/walker
+module github.com/dmfed/walker/v2
 
-go 1.19
+go 1.20

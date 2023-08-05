@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -7,14 +6,14 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/dmfed/walker"
+	"github.com/dmfed/walker/v2"
 )
 
 // onlyGoFiles implements walker.FilterFunc
 func onlyGoFiles(info walker.Info) bool {
 	fileExt := filepath.Ext(info.Path)
 	isRegular := info.DirEntry.Type().IsRegular()
-	return (fileExt == ".go") && isRegular 
+	return (fileExt == ".go") && isRegular
 }
 
 func main() {
@@ -25,18 +24,18 @@ func main() {
 	flag.Parse()
 
 	// First we'll create a Walker instance.
-	w := walker.New()
+	w := walker.New().WithFilters(onlyGoFiles)
 
 	// Then we tell Walker to crawl our source directory with
 	// a custom filter (onlyGoFiles func).
-	infos := w.Walk(context.Background(), src, onlyGoFiles)
+	infos := w.Walk(context.Background(), src)
 
 	for f := range infos {
 		// this will output only names of Go files found
-		fmt.Println(f.DirEntry.Name())
+		fmt.Println(f.Path)
 	}
 
-	// let's check whether Walker encountered errors 
+	// let's check whether Walker encountered errors
 	// or finished it's work normally
 	if err := w.Err(); err != nil {
 		fmt.Println("Walker failed with error:", err)

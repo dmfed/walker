@@ -2,6 +2,7 @@ package walker
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -20,7 +21,7 @@ func TestWalk(t *testing.T) {
 			t.Error("got nil DirEntry from channel")
 		}
 	}
-	
+
 	// range should succeed and resulting error should be nil
 	if err := w.Err(); err != nil {
 		t.Error("walker returned error for testdata", err)
@@ -37,11 +38,6 @@ func TestWalkWithContextCancelation(t *testing.T) {
 
 	if err := w.Err(); err != nil {
 		t.Errorf("Err() returns non-nil error before chan closed")
-	}
-
-
-	if err := w.Err(); err != nil {
-		t.Error(err) // err should be nil until files chan is closed
 	}
 
 	count := 0
@@ -61,43 +57,100 @@ func TestWalkWithContextCancelation(t *testing.T) {
 
 	// err should be non-nil because the context has been cancelled
 	if err := w.Err(); err == nil {
-		t.Error(err) // context cancellation should raise error
+		t.Error("Walker retuned nil error after context cancellation") // context cancellation should raise error
 	}
 }
 
 func TestFilterDirs(t *testing.T) {
-	w := New()
+	w := New().WithFilters(DiscardDirs())
 
-	files := w.Walk(context.Background(), testPath, DiscardDirs)
+	files := w.Walk(context.Background(), testPath)
 
 	for f := range files {
+		t.Log(f.Path)
 		if f.DirEntry.IsDir() {
 			t.Error("DiscardDirs  filter fails")
 		}
 	}
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestFilterRegular(t *testing.T) {
-	w := New()
+	w := New().WithFilters(DiscardRegular())
 
-	files := w.Walk(context.Background(), testPath, DiscardRegular)
+	files := w.Walk(context.Background(), testPath)
 
 	for f := range files {
 		if f.DirEntry.Type().IsRegular() {
 			t.Error("DiscardRegular filter fails")
 		}
 	}
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestSkipDirs(t *testing.T) {
+	w := New().WithSkipDirs("b", "c/ert")
+	files := w.Walk(context.Background(), testPath)
+
+	for f := range files {
+		if strings.Contains(f.Path, "b") || strings.Contains(f.Path, "c/ert") {
+			t.Errorf("SkipDir filter failed for %s", f.Path)
+		}
+	}
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestTwoFilters(t *testing.T) {
-	w := New()
+	w := New().WithFilters(DiscardRegular(), DiscardDirs())
 
-	files := w.Walk(context.Background(), testPath, DiscardRegular, DiscardDirs)
+	files := w.Walk(context.Background(), testPath)
 
 	for f := range files {
 		t.Log(f)
 		if f.DirEntry.Type().IsRegular() || f.DirEntry.IsDir() {
 			t.Error("Two filters fail")
 		}
+	}
+}
+
+func TestSetupWithZeroAndNilValues(t *testing.T) {
+	readAll := func(c <-chan Info) {
+		for range c {
+			continue
+		}
+	}
+
+	w := New().WithFilters().WithSkipDirs()
+	infos := w.Walk(context.Background(), testPath)
+	readAll(infos)
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
+
+	w = New().WithFilters(nil)
+	infos = w.Walk(context.Background(), testPath)
+	readAll(infos)
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
+
+	w = New().WithFilters([]FilterFunc{}...)
+	infos = w.Walk(context.Background(), testPath)
+	readAll(infos)
+	if err := w.Err(); err != nil {
+		t.Error(err)
+	}
+
+	w = New().WithSkipDirs([]string{}...)
+	infos = w.Walk(context.Background(), testPath)
+	readAll(infos)
+	if err := w.Err(); err != nil {
+		t.Error(err)
 	}
 }

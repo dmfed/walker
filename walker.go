@@ -2,9 +2,9 @@ package walker
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
-	"sync"
 )
 
 // Info represents and entry located by fs.WalkDir
@@ -12,12 +12,12 @@ import (
 // for example if Walk is called with path == "/tmp"
 // the returned entries will not contain "/tmp" in Path field.
 type Info struct {
-	Path string
+	Path     string
 	DirEntry fs.DirEntry
 }
 
 // Walker crawls the specified path using fs.WalkDir and sends all encountered
-// items as Info to the channel returned by Walk method. 
+// items as Info to the channel returned by Walk method.
 type Walker interface {
 	// Walk runs fs.WalkDir under the hood and returns chan of Info.
 	// All items found by fs.WalkDir are returned as is. Basically
@@ -25,12 +25,21 @@ type Walker interface {
 	// to send result to a channel. It also computes lazily waiting for reader
 	// to pull results from the channel as opposed to fs.WalkDir (fire and forget,
 	// then wait for all recursive calls to finish).
-	Walk(ctx context.Context, path string, funcs ...FilterFunc) <-chan Info
+	// Walk should not be used concurrently! Create new instance of Walker instead.
+	Walk(ctx context.Context, path string) <-chan Info
 
-	// Err explains why chan returned by Walk was closed. If context was 
-	// cancelled or context deadline exceeded or whatewer error the 
+	// WithFilters adds FilterFuncs to an existing Walker and returns instance of Walker.
+	// nil values will be omitted.
+	WithFilters(funcs ...FilterFunc) Walker
+
+	// WithSkipDirs tells Walker not to visit specific paths (subpaths skipped as well) and
+	// returns instanse of Walker. Empty strings will be omitted.
+	WithSkipDirs(paths ...string) Walker
+
+	// Err explains why chan returned by Walk was closed. If context was
+	// cancelled or context deadline exceeded or whatewer error the
 	// WalkDirFunc function encountered it is returned by this method.
-	// Err will return nil if chan Info has not yet been closed. 
+	// Err will return nil if chan Info has not yet been closed.
 	Err() error
 }
 
@@ -38,59 +47,64 @@ func New() Walker {
 	return newWalker()
 }
 
-func (w *walker) Err() error {
-	return walkerErr(w)
-}
-
-func (w *walker) Walk(ctx context.Context, path string, funcs ...FilterFunc) (<-chan Info)  {
-	return walkerWalk(ctx, w, path, funcs...) 
-}
-
 // here comes the implementation
 
 type walker struct {
-	err error
-	mu sync.Mutex
+	filters []FilterFunc
+	skip    []string
+	err     error
 }
 
 func newWalker() Walker {
 	return &walker{}
 }
 
+func (w *walker) Err() error {
+	return walkerErr(w)
+}
 
-func walkerWalk(ctx context.Context, w *walker, path string, funcs ...FilterFunc) (<-chan Info) {
+func (w *walker) Walk(ctx context.Context, path string) <-chan Info {
+	return walkerWalk(ctx, w, path, w.filters...)
+}
+
+func (w *walker) WithFilters(funcs ...FilterFunc) Walker {
+	for _, f := range funcs {
+		if f != nil {
+			w.filters = append(w.filters, f)
+		}
+	}
+	return w
+}
+
+func (w *walker) WithSkipDirs(paths ...string) Walker {
+	for _, p := range paths {
+		if p != "" {
+			w.skip = append(w.skip, paths...)
+		}
+	}
+	return w
+}
+
+func walkerWalk(ctx context.Context, w *walker, path string, funcs ...FilterFunc) <-chan Info {
 	out := make(chan Info)
-
 	go func(c chan Info) {
 		defer close(c)
 
-		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, c))
-
-		w.mu.Lock()
+		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, w, c))
 		w.err = err
-		w.mu.Unlock()
 	}(out)
-
-	if len(funcs) > 0 {
-		out = filter(out, funcs...)
-	}
-
 	return out
 }
 
 func walkerErr(w *walker) error {
-	var err error
-
-	w.mu.Lock()
-	err = w.err
-	w.mu.Unlock()
-
-	return err
+	return w.err
 }
 
-func newWalkDirFunc(ctx context.Context, infoCh chan Info) fs.WalkDirFunc {
+func newWalkDirFunc(ctx context.Context, w *walker, infoCh chan Info) fs.WalkDirFunc {
 	return func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil && errors.Is(err, fs.SkipDir) {
+			return nil
+		} else if err != nil {
 			// if stat/io error occurs then
 			// fs.WalkDir calls WalkDirFunc with
 			// this stat error
@@ -98,18 +112,43 @@ func newWalkDirFunc(ctx context.Context, infoCh chan Info) fs.WalkDirFunc {
 			// but return, since d is nil in this case.
 			return err
 		}
+		if d.IsDir() && len(w.skip) > 0 {
+			for i := range w.skip {
+				if w.skip[i] == p {
+					return fs.SkipDir
+				}
+			}
+		}
 
-		info := Info {
-			Path: p,
+		info := Info{
+			Path:     p,
 			DirEntry: d,
 		}
 
+		if len(w.filters) > 0 {
+			if oneOfChecksFails(info, w.filters...) {
+				return nil
+			}
+		}
+
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			err = ctx.Err()
 		case infoCh <- info:
 			err = nil
 		}
 		return err
 	}
+}
+
+// oneOfChecksFails actually runs all tests. It returns true if
+// at least one of passed FilteFunc failed.
+func oneOfChecksFails(info Info, funcs ...FilterFunc) (failed bool) {
+	for _, f := range funcs {
+		if !f(info) {
+			failed = true
+			break
+		}
+	}
+	return
 }
