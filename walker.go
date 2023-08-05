@@ -2,7 +2,6 @@ package walker
 
 import (
 	"context"
-	"errors"
 	"io/fs"
 	"os"
 )
@@ -25,16 +24,15 @@ type Walker interface {
 	// to send result to a channel. It also computes lazily waiting for reader
 	// to pull results from the channel as opposed to fs.WalkDir (fire and forget,
 	// then wait for all recursive calls to finish).
-	// Walk should not be used concurrently! Create new instance of Walker instead.
+	// Walker should not be used concurrently. Create new instance of Walker instead.
+	// However, concurrent reads from output chan are ok.
 	Walk(ctx context.Context, path string) <-chan Info
 
 	// WithFilters adds FilterFuncs to an existing Walker and returns instance of Walker.
-	// nil values will be omitted.
+	// FilerFuncs are run for each entry Walker finds in the same order as passed to this method.
+	// When one of funcs returns Action not equal to Pass this action is applied and other
+	// checks are not perfomed.
 	WithFilters(funcs ...FilterFunc) Walker
-
-	// WithSkipDirs tells Walker not to visit specific paths (subpaths skipped as well) and
-	// returns instanse of Walker. Empty strings will be omitted.
-	WithSkipDirs(paths ...string) Walker
 
 	// Err explains why chan returned by Walk was closed. If context was
 	// cancelled or context deadline exceeded or whatewer error the
@@ -51,7 +49,6 @@ func New() Walker {
 
 type walker struct {
 	filters []FilterFunc
-	skip    []string
 	err     error
 }
 
@@ -76,20 +73,10 @@ func (w *walker) WithFilters(funcs ...FilterFunc) Walker {
 	return w
 }
 
-func (w *walker) WithSkipDirs(paths ...string) Walker {
-	for _, p := range paths {
-		if p != "" {
-			w.skip = append(w.skip, paths...)
-		}
-	}
-	return w
-}
-
 func walkerWalk(ctx context.Context, w *walker, path string, funcs ...FilterFunc) <-chan Info {
 	out := make(chan Info)
 	go func(c chan Info) {
 		defer close(c)
-
 		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, w, c))
 		w.err = err
 	}(out)
@@ -102,22 +89,13 @@ func walkerErr(w *walker) error {
 
 func newWalkDirFunc(ctx context.Context, w *walker, infoCh chan Info) fs.WalkDirFunc {
 	return func(p string, d fs.DirEntry, err error) error {
-		if err != nil && errors.Is(err, fs.SkipDir) {
-			return nil
-		} else if err != nil {
+		if err != nil {
 			// if stat/io error occurs then
 			// fs.WalkDir calls WalkDirFunc with
 			// this stat error
 			// nothing to do here
 			// but return, since d is nil in this case.
 			return err
-		}
-		if d.IsDir() && len(w.skip) > 0 {
-			for i := range w.skip {
-				if w.skip[i] == p {
-					return fs.SkipDir
-				}
-			}
 		}
 
 		info := Info{
@@ -126,8 +104,14 @@ func newWalkDirFunc(ctx context.Context, w *walker, infoCh chan Info) fs.WalkDir
 		}
 
 		if len(w.filters) > 0 {
-			if oneOfChecksFails(info, w.filters...) {
+			a := applyAllFilters(info, w.filters)
+			switch a {
+			case Discard:
 				return nil
+			case SkipDir:
+				return fs.SkipDir
+			case SkipAll:
+				return fs.SkipAll
 			}
 		}
 
@@ -141,14 +125,15 @@ func newWalkDirFunc(ctx context.Context, w *walker, infoCh chan Info) fs.WalkDir
 	}
 }
 
-// oneOfChecksFails actually runs all tests. It returns true if
-// at least one of passed FilteFunc failed.
-func oneOfChecksFails(info Info, funcs ...FilterFunc) (failed bool) {
+// applyAllFilters actually runs all tests. It returns on encountering
+// firts Action not equal to Pass.
+func applyAllFilters(info Info, funcs []FilterFunc) Action {
+	var a Action
 	for _, f := range funcs {
-		if !f(info) {
-			failed = true
+		a = f(info)
+		if a != Pass {
 			break
 		}
 	}
-	return
+	return a
 }

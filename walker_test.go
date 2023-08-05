@@ -67,7 +67,7 @@ func TestFilterDirs(t *testing.T) {
 	files := w.Walk(context.Background(), testPath)
 
 	for f := range files {
-		t.Log(f.Path)
+		// t.Log(f.Path)
 		if f.DirEntry.IsDir() {
 			t.Error("DiscardDirs  filter fails")
 		}
@@ -93,7 +93,7 @@ func TestFilterRegular(t *testing.T) {
 }
 
 func TestSkipDirs(t *testing.T) {
-	w := New().WithSkipDirs("b", "c/ert")
+	w := New().WithFilters(SkipDirs("b", "c/ert"))
 	files := w.Walk(context.Background(), testPath)
 
 	for f := range files {
@@ -103,6 +103,21 @@ func TestSkipDirs(t *testing.T) {
 	}
 	if err := w.Err(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestSkipAll(t *testing.T) {
+	w := New().WithFilters(
+		func(Info) Action {
+			return SkipAll
+		})
+	var count int
+	files := w.Walk(context.Background(), testPath)
+	for range files {
+		count++
+	}
+	if count > 0 {
+		t.Errorf("SkipAll failed, found %d files", count)
 	}
 }
 
@@ -126,7 +141,7 @@ func TestSetupWithZeroAndNilValues(t *testing.T) {
 		}
 	}
 
-	w := New().WithFilters().WithSkipDirs()
+	w := New().WithFilters()
 	infos := w.Walk(context.Background(), testPath)
 	readAll(infos)
 	if err := w.Err(); err != nil {
@@ -141,13 +156,6 @@ func TestSetupWithZeroAndNilValues(t *testing.T) {
 	}
 
 	w = New().WithFilters([]FilterFunc{}...)
-	infos = w.Walk(context.Background(), testPath)
-	readAll(infos)
-	if err := w.Err(); err != nil {
-		t.Error(err)
-	}
-
-	w = New().WithSkipDirs([]string{}...)
 	infos = w.Walk(context.Background(), testPath)
 	readAll(infos)
 	if err := w.Err(); err != nil {
