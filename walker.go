@@ -74,7 +74,7 @@ func (w *walker) WithFilters(funcs ...FilterFunc) Walker {
 }
 
 func walkerWalk(ctx context.Context, w *walker, path string, funcs ...FilterFunc) <-chan Info {
-	out := make(chan Info)
+	out := make(chan Info, 10)
 	go func(c chan Info) {
 		defer close(c)
 		err := fs.WalkDir(os.DirFS(path), ".", newWalkDirFunc(ctx, w, c))
